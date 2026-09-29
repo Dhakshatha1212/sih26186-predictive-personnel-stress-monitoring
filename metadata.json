@@ -1,0 +1,6 @@
+{
+  "name": "SIH26186 - AI-Based Predictive Personnel Stress & Welfare Monitoring System",
+  "description": "Prototype personnel welfare and operational readiness monitoring system using biometric logs, transparent heuristic stress calculations, squad readiness heatmaps, and medical officer alert management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
