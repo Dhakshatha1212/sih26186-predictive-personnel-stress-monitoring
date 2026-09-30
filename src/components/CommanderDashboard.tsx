@@ -36,6 +36,7 @@ interface CommanderDashboardProps {
     actionType: 'STAND_DOWN_24H' | 'AUTO_ROTATE_SHIFT';
     commanderNotes?: string;
   }) => Promise<void>;
+  activeTab?: 'overview' | 'unit-readiness' | 'squad-monitoring' | 'alerts' | 'action-history';
 }
 
 export const CommanderDashboard: React.FC<CommanderDashboardProps> = ({
@@ -45,6 +46,7 @@ export const CommanderDashboard: React.FC<CommanderDashboardProps> = ({
   units,
   actions,
   onIssueAction,
+  activeTab = 'overview',
 }) => {
   const [filterRisk, setFilterRisk] = useState<'ALL' | RiskLevel>('ALL');
   const [selectedAnonPersonnel, setSelectedAnonPersonnel] = useState<

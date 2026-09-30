@@ -8,6 +8,7 @@ import {
   EnvironmentalCondition,
   InterventionStatus,
   RiskLevel,
+  Role,
   SquadReadinessSummary,
   StressAlert,
   User,
@@ -117,23 +118,133 @@ export function getUsers(): User[] {
   return inMemStore.users;
 }
 
-export function getUserByUsername(username: string): User | undefined {
-  const norm = username.trim().toLowerCase();
+export function getUserByUsername(usernameOrEmail: string): User | undefined {
+  const norm = usernameOrEmail.trim().toLowerCase();
   return inMemStore.users.find(
-    (u) => u.username.toLowerCase() === norm || u.soldierId.toLowerCase() === norm
+    (u) =>
+      u.username.toLowerCase() === norm ||
+      u.soldierId.toLowerCase() === norm ||
+      u.email.toLowerCase() === norm
   );
 }
 
-export function authenticateUser(username: string, password?: string): User | null {
-  const user = getUserByUsername(username);
+export function authenticateUser(usernameOrEmail: string, password?: string): User | null {
+  const user = getUserByUsername(usernameOrEmail);
   if (!user) {
     return null;
   }
-  // In prototype demo mode, allow valid demo password or standard default 'demo123'
+  // Allow matching user password or standard demo password 'demo123'
   if (password && user.password && user.password !== password && password !== 'demo123') {
     return null;
   }
   return user;
+}
+
+export function registerUser(data: {
+  name: string;
+  email: string;
+  password?: string;
+  role: Role;
+  unit: string;
+  squad?: string;
+  soldierId?: string;
+  rank?: string;
+}): { success: boolean; user?: User; error?: string } {
+  const normEmail = data.email.trim().toLowerCase();
+  const existing = inMemStore.users.find((u) => u.email.toLowerCase() === normEmail);
+  if (existing) {
+    return { success: false, error: 'An account with this email address already exists.' };
+  }
+
+  const role = data.role;
+  let finalSoldierId = data.soldierId ? data.soldierId.trim().toUpperCase() : '';
+  if (role === 'SOLDIER' && !finalSoldierId) {
+    finalSoldierId = `SDR-${Math.floor(1000 + Math.random() * 9000)}`;
+  } else if (!finalSoldierId) {
+    finalSoldierId =
+      role === 'COMMANDER'
+        ? `CMD-${Math.floor(100 + Math.random() * 900)}`
+        : `MED-${Math.floor(100 + Math.random() * 900)}`;
+  }
+
+  const rank =
+    data.rank ||
+    (role === 'SOLDIER'
+      ? 'Sepoy'
+      : role === 'COMMANDER'
+      ? 'Major'
+      : 'Medical Officer');
+
+  const username =
+    normEmail.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || `user_${Date.now()}`;
+
+  const newUser: User = {
+    id: `user-${Date.now()}`,
+    soldierId: finalSoldierId,
+    username,
+    password: data.password || 'demo123',
+    name: data.name.trim(),
+    role,
+    unit: data.unit.trim(),
+    squad: data.squad?.trim() || '1st Section',
+    rank,
+    email: normEmail,
+  };
+
+  inMemStore.users.push(newUser);
+
+  // If soldier, also register into soldiers list and generate initial 7-day baseline logs
+  if (role === 'SOLDIER') {
+    inMemStore.soldiers.push({
+      soldierId: finalSoldierId,
+      name: newUser.name,
+      rank: newUser.rank,
+      unit: newUser.unit,
+      squadRole: 'Rifleman',
+      profileType: 'optimal',
+      defaultEnvironment: 'NORMAL',
+    });
+
+    const baseDate = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(baseDate);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const hrv = Math.round(68 + ((i * 3) % 7) - 3);
+      const sleepHours = Number((7.4 + ((i * 0.3) % 0.8) - 0.4).toFixed(1));
+      const restingHeartRate = Math.round(62 + ((i * 2) % 5) - 2);
+      const dutyDuration = Number((8.0 + (i % 2 === 0 ? 0.5 : 0)).toFixed(1));
+
+      const breakdown = calculateStressScore(
+        { hrv, sleepHours, restingHeartRate, dutyDuration },
+        inMemStore.weights,
+        inMemStore.thresholds
+      );
+
+      inMemStore.logs.unshift({
+        id: `log-${finalSoldierId}-${dateStr}`,
+        soldierId: finalSoldierId,
+        date: dateStr,
+        timestamp: d.getTime(),
+        hrv,
+        sleepHours,
+        restingHeartRate,
+        dutyDuration,
+        stressScore: breakdown.score,
+        riskLevel: breakdown.riskLevel,
+        environmentalCondition: 'NORMAL',
+        adjustedStressScore: breakdown.score,
+        notes: 'Initial welfare onboarding telemetry log',
+      });
+    }
+  }
+
+  if (mongoDb) {
+    mongoDb.collection('users').insertOne(newUser as any).catch(console.error);
+  }
+
+  const { password: _, ...safeUser } = newUser;
+  return { success: true, user: safeUser as User };
 }
 
 export function getDemoAccounts(): Array<Omit<User, 'password'> & { demoPassword: string; riskProfileNote: string }> {

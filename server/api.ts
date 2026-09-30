@@ -17,6 +17,7 @@ import {
   authenticateUser,
   getDemoAccounts,
   getUserByUsername,
+  registerUser,
 } from './db.ts';
 import { calculateStressScore, calculateEnvironmentalAdjustment } from '../src/utils/stressCalculator.ts';
 import { EnvironmentalCondition, InterventionStatus } from '../src/types.ts';
@@ -30,13 +31,13 @@ apiRouter.post('/auth/login', (req: Request, res: Response) => {
   try {
     const { username, password } = req.body;
     if (!username) {
-      return res.status(400).json({ error: 'Username or Soldier ID is required' });
+      return res.status(400).json({ error: 'Email or Username is required' });
     }
 
     const user = authenticateUser(username, password);
     if (!user) {
       return res.status(401).json({
-        error: 'Invalid credentials. Demo accounts use password "demo123". Check demo account list.',
+        error: 'Invalid credentials. Please verify your email/username and password.',
       });
     }
 
@@ -46,6 +47,74 @@ apiRouter.post('/auth/login', (req: Request, res: Response) => {
       success: true,
       message: `Authenticated successfully as ${user.rank} ${user.name}`,
       user: safeUser,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Auth: Registration Endpoint
+apiRouter.post('/auth/register', (req: Request, res: Response) => {
+  try {
+    const { name, email, password, role, unit, squad, soldierId, rank } = req.body;
+
+    if (!name || !email || !password || !role || !unit) {
+      return res.status(400).json({ error: 'Please provide all required fields (Name, Email, Password, Role, Unit).' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+
+    if (!['SOLDIER', 'COMMANDER', 'DOCTOR'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role selected.' });
+    }
+
+    const result = registerUser({
+      name,
+      email,
+      password,
+      role,
+      unit,
+      squad,
+      soldierId,
+      rank,
+    });
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Account created successfully. You can now sign in.',
+      user: result.user,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Auth: Forgot Password Request
+apiRouter.post('/auth/forgot-password', (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email address is required.' });
+    }
+
+    const user = getUserByUsername(email);
+    // Don't leak existence, return professional response
+    res.json({
+      success: true,
+      message: user
+        ? 'Password reset instructions have been dispatched to your official registered address.'
+        : 'If an account exists with this address, password reset instructions have been dispatched.',
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

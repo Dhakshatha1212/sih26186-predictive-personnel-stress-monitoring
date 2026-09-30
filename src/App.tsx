@@ -17,17 +17,20 @@ import {
   StressAlert,
   User,
 } from './types.ts';
-import { Header } from './components/Header.tsx';
-import { LoginScreen } from './components/LoginScreen.tsx';
+import { LoginPage } from './components/auth/LoginPage.tsx';
+import { RegisterPage } from './components/auth/RegisterPage.tsx';
+import { ForgotPasswordModal } from './components/auth/ForgotPasswordModal.tsx';
+import { AppShell, NavTab } from './components/layout/AppShell.tsx';
 import { SoldierDashboard } from './components/SoldierDashboard.tsx';
 import { CommanderDashboard } from './components/CommanderDashboard.tsx';
 import { DoctorDashboard } from './components/DoctorDashboard.tsx';
 import { ExplainabilityModal } from './components/ExplainabilityModal.tsx';
 import { MongoStatusModal } from './components/MongoStatusModal.tsx';
 import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './utils/stressCalculator.ts';
-import { Shield, AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function App() {
+  // Authentication State
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const stored = sessionStorage.getItem('sih_active_user');
@@ -37,7 +40,21 @@ export default function App() {
     }
   });
 
-  const [currentRole, setCurrentRole] = useState<Role>(currentUser?.role || 'SOLDIER');
+  // Client Routing State for Login/Register
+  const [authRoute, setAuthRoute] = useState<'login' | 'register'>(() => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/register') {
+      return 'register';
+    }
+    return 'login';
+  });
+
+  const [registrationNotice, setRegistrationNotice] = useState<string | null>(null);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+
+  // Active navigation tab within authenticated shell
+  const [activeTab, setActiveTab] = useState<NavTab>('overview');
+
+  // Core Data States
   const [users, setUsers] = useState<User[]>([]);
   const [allSoldiers, setAllSoldiers] = useState<
     Array<{ soldierId: string; name: string; rank: string; unit: string }>
@@ -58,7 +75,7 @@ export default function App() {
   const [isExplainabilityOpen, setIsExplainabilityOpen] = useState(false);
   const [isDbModalOpen, setIsDbModalOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Units list
@@ -68,6 +85,25 @@ export default function App() {
     '21 Maratha Light Infantry (Charlie Sqd)',
     '7 Ladakh Scouts (Delta Patrol)',
   ];
+
+  // Route Synchronization & Guard
+  useEffect(() => {
+    if (!currentUser) {
+      if (authRoute === 'register') {
+        window.history.replaceState(null, '', '/register');
+      } else {
+        window.history.replaceState(null, '', '/login');
+      }
+    } else {
+      if (currentUser.role === 'SOLDIER') {
+        window.history.replaceState(null, '', '/soldier');
+      } else if (currentUser.role === 'COMMANDER') {
+        window.history.replaceState(null, '', '/commander');
+      } else if (currentUser.role === 'DOCTOR') {
+        window.history.replaceState(null, '', '/doctor');
+      }
+    }
+  }, [currentUser, authRoute]);
 
   // Fetch DB Status
   const fetchDbStatus = useCallback(async () => {
@@ -138,8 +174,8 @@ export default function App() {
     }
   }, []);
 
-  // Fetch Users & Soldiers
-  const fetchInitialData = useCallback(async () => {
+  // Fetch Initial Data (only triggered when authenticated to prevent data leakage)
+  const fetchAuthenticatedData = useCallback(async () => {
     try {
       setIsLoading(true);
       setErrorMessage(null);
@@ -168,22 +204,17 @@ export default function App() {
 
       await Promise.all([fetchDbStatus(), fetchCommanderActions()]);
     } catch (err: any) {
-      console.error('Initialization error:', err);
-      setErrorMessage('Could not connect to local API server. Retrying...');
+      console.error('Authenticated initialization error:', err);
+      setErrorMessage('Could not connect to local API server.');
     } finally {
       setIsLoading(false);
     }
   }, [fetchDbStatus, fetchCommanderActions]);
 
-  // Load initial data on mount
-  useEffect(() => {
-    fetchInitialData();
-  }, [fetchInitialData]);
-
-  // When current user changes, trigger targeted data queries
+  // Load data only when user is authenticated
   useEffect(() => {
     if (currentUser) {
-      setCurrentRole(currentUser.role);
+      fetchAuthenticatedData();
       if (currentUser.role === 'SOLDIER' && currentUser.soldierId) {
         setSelectedSoldierId(currentUser.soldierId);
         fetchSoldierLogs(currentUser.soldierId);
@@ -193,13 +224,16 @@ export default function App() {
       } else if (currentUser.role === 'DOCTOR') {
         fetchAlerts();
       }
+    } else {
+      // Background DB status check for login indicators
+      fetchDbStatus();
     }
-  }, [currentUser, selectedUnit, fetchSoldierLogs, fetchSquadReadiness, fetchCommanderActions, fetchAlerts]);
+  }, [currentUser, selectedUnit, fetchAuthenticatedData, fetchSoldierLogs, fetchSquadReadiness, fetchCommanderActions, fetchAlerts, fetchDbStatus]);
 
-  // Handlers for Authentication
+  // Login Handler
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
-    setCurrentRole(user.role);
+    setActiveTab('overview');
     try {
       sessionStorage.setItem('sih_active_user', JSON.stringify(user));
     } catch (err) {
@@ -217,25 +251,18 @@ export default function App() {
     }
   };
 
+  // Logout Handler
   const handleLogout = () => {
     setCurrentUser(null);
+    setAuthRoute('login');
+    setActiveTab('overview');
+    setSoldierLogs([]);
+    setSquadReadiness(null);
+    setAlerts([]);
     try {
       sessionStorage.removeItem('sih_active_user');
     } catch (err) {
       console.warn('sessionStorage error:', err);
-    }
-  };
-
-  const handleQuickSwitchUser = (user: User) => {
-    handleLoginSuccess(user);
-  };
-
-  // Switch role handler (when enabled)
-  const handleRoleChange = (role: Role) => {
-    setCurrentRole(role);
-    const targetUser = users.find((u) => u.role === role);
-    if (targetUser) {
-      handleLoginSuccess(targetUser);
     }
   };
 
@@ -261,7 +288,6 @@ export default function App() {
       throw new Error(err.error || 'Failed to submit log');
     }
 
-    // Refresh logs and statuses
     await Promise.all([
       fetchSoldierLogs(data.soldierId),
       fetchSquadReadiness(selectedUnit),
@@ -290,7 +316,6 @@ export default function App() {
       throw new Error(err.error || 'Failed to issue commander action');
     }
 
-    // Refresh commander state & soldier logs
     await Promise.all([
       fetchCommanderActions(),
       fetchSquadReadiness(selectedUnit),
@@ -358,7 +383,7 @@ export default function App() {
       const res = await fetch('/api/reset-demo', { method: 'POST' });
       if (res.ok) {
         await Promise.all([
-          fetchInitialData(),
+          fetchAuthenticatedData(),
           fetchSoldierLogs(selectedSoldierId),
           fetchSquadReadiness(selectedUnit),
           fetchAlerts(),
@@ -373,142 +398,123 @@ export default function App() {
     }
   };
 
-  // If not authenticated, render Login Screen
+  // ============================================================
+  // 1. UNATHENTICATED STATE: ONLY LOGIN OR REGISTER SCREEN IS RENDERED
+  // ============================================================
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
-        <LoginScreen
-          onLoginSuccess={handleLoginSuccess}
-          dbStatus={dbStatus}
-          onOpenExplainability={() => setIsExplainabilityOpen(true)}
-          onOpenDbStatus={() => setIsDbModalOpen(true)}
-        />
+        {authRoute === 'register' ? (
+          <RegisterPage
+            onNavigateToLogin={(msg) => {
+              setAuthRoute('login');
+              if (msg) setRegistrationNotice(msg);
+            }}
+          />
+        ) : (
+          <LoginPage
+            onLoginSuccess={handleLoginSuccess}
+            onNavigateToRegister={() => {
+              setRegistrationNotice(null);
+              setAuthRoute('register');
+            }}
+            onOpenForgotPassword={() => setIsForgotPasswordOpen(true)}
+            registrationSuccessMessage={registrationNotice}
+          />
+        )}
 
-        {/* Explainability & Calculation Inspector Modal */}
-        <ExplainabilityModal
-          isOpen={isExplainabilityOpen}
-          onClose={() => setIsExplainabilityOpen(false)}
-          weights={weights}
-          thresholds={thresholds}
-          onSaveConfig={handleSaveConfig}
-        />
-
-        {/* Database Status & MongoDB Atlas M0 Modal */}
-        <MongoStatusModal
-          isOpen={isDbModalOpen}
-          onClose={() => setIsDbModalOpen(false)}
-          status={dbStatus}
-          onResetData={handleResetData}
-          isResetting={isResetting}
+        {/* Forgot Password Modal */}
+        <ForgotPasswordModal
+          isOpen={isForgotPasswordOpen}
+          onClose={() => setIsForgotPasswordOpen(false)}
         />
       </div>
     );
   }
 
-  // Active Soldier user profile
-  const soldierUser: User = currentUser;
-
+  // ============================================================
+  // 2. AUTHENTICATED STATE: PROFESSIONAL APPLICATION SHELL & DASHBOARD
+  // ============================================================
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-white">
-      {/* Top Header with User Badge & Logout */}
-      <Header
-        currentRole={currentRole}
-        onRoleChange={handleRoleChange}
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        allUsers={users}
-        onQuickSwitchUser={handleQuickSwitchUser}
-        dbStatus={dbStatus}
-        onOpenExplainability={() => setIsExplainabilityOpen(true)}
-        onOpenDbStatus={() => setIsDbModalOpen(true)}
-        onResetData={handleResetData}
-        isResetting={isResetting}
-      />
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
-        {/* Loading Spinner */}
-        {isLoading && (
-          <div className="flex items-center justify-center p-12 text-slate-400 gap-3">
-            <RefreshCw className="w-5 h-5 animate-spin text-emerald-400" />
-            <span className="text-sm">Synchronizing Defence Welfare Core Telemetry...</span>
-          </div>
-        )}
-
-        {/* Error Banner */}
-        {errorMessage && (
-          <div className="mb-6 p-4 bg-rose-950/60 border border-rose-800 rounded-lg flex items-center justify-between text-xs text-rose-200">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-400" />
-              <span>{errorMessage}</span>
-            </div>
-            <button
-              onClick={() => fetchInitialData()}
-              className="px-3 py-1 bg-rose-900/80 hover:bg-rose-800 text-white rounded cursor-pointer"
-            >
-              Retry
-            </button>
-          </div>
-        )}
-
-        {/* Active Role Dashboard View with Strict Role Isolation */}
-        {!isLoading && (
-          <>
-            {currentRole === 'SOLDIER' && (
-              <SoldierDashboard
-                soldier={soldierUser}
-                logs={soldierLogs}
-                onSubmitLog={handleSubmitLog}
-                weights={weights}
-                thresholds={thresholds}
-              />
-            )}
-
-            {currentRole === 'COMMANDER' && (
-              <CommanderDashboard
-                readiness={squadReadiness}
-                selectedUnit={selectedUnit}
-                onSelectUnit={setSelectedUnit}
-                units={units}
-                actions={commanderActions}
-                onIssueAction={handleIssueCommanderAction}
-              />
-            )}
-
-            {currentRole === 'DOCTOR' && (
-              <DoctorDashboard
-                alerts={alerts}
-                allSoldiers={allSoldiers}
-                selectedSoldierId={selectedSoldierId}
-                onSelectSoldier={(id) => {
-                  setSelectedSoldierId(id);
-                  fetchSoldierLogs(id);
-                }}
-                soldierLogs={soldierLogs}
-                units={units}
-                onUpdateAlert={handleUpdateAlert}
-              />
-            )}
-          </>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950/80 px-4 py-4 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-emerald-500" />
-            <span>SIH26186 • Predictive Personnel Stress &amp; Welfare Monitoring Prototype</span>
-          </div>
-          <div className="flex items-center gap-3 text-[11px] text-slate-500">
-            <span>Synthetic Demonstration Data Only</span>
-            <span>·</span>
-            <span>₹0 Cost Architecture • MongoDB Atlas M0 Ready</span>
-          </div>
+    <AppShell
+      currentUser={currentUser}
+      onLogout={handleLogout}
+      activeTab={activeTab}
+      onSelectTab={(tab) => setActiveTab(tab)}
+      dbStatus={dbStatus}
+      onOpenExplainability={() => setIsExplainabilityOpen(true)}
+      onOpenDbStatus={() => setIsDbModalOpen(true)}
+    >
+      {/* Loading state indicator */}
+      {isLoading && (
+        <div className="flex items-center justify-center p-8 text-slate-400 gap-3">
+          <RefreshCw className="w-5 h-5 animate-spin text-emerald-400" />
+          <span className="text-sm">Synchronizing personnel records...</span>
         </div>
-      </footer>
+      )}
 
-      {/* Explainability & Calculation Inspector Modal */}
+      {/* Error Banner */}
+      {errorMessage && (
+        <div className="mb-6 p-4 bg-rose-950/60 border border-rose-800 rounded-lg flex items-center justify-between text-xs text-rose-200">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            onClick={() => fetchAuthenticatedData()}
+            className="px-3 py-1 bg-rose-900/80 hover:bg-rose-800 text-white rounded cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Role Dashboard Routing */}
+      {!isLoading && (
+        <>
+          {currentUser.role === 'SOLDIER' && (
+            <SoldierDashboard
+              soldier={currentUser}
+              logs={soldierLogs}
+              onSubmitLog={handleSubmitLog}
+              weights={weights}
+              thresholds={thresholds}
+              activeTab={activeTab as any}
+              onNavigateTab={(tab) => setActiveTab(tab as any)}
+            />
+          )}
+
+          {currentUser.role === 'COMMANDER' && (
+            <CommanderDashboard
+              readiness={squadReadiness}
+              selectedUnit={selectedUnit}
+              onSelectUnit={setSelectedUnit}
+              units={units}
+              actions={commanderActions}
+              onIssueAction={handleIssueCommanderAction}
+              activeTab={activeTab as any}
+            />
+          )}
+
+          {currentUser.role === 'DOCTOR' && (
+            <DoctorDashboard
+              alerts={alerts}
+              allSoldiers={allSoldiers}
+              selectedSoldierId={selectedSoldierId}
+              onSelectSoldier={(id) => {
+                setSelectedSoldierId(id);
+                fetchSoldierLogs(id);
+              }}
+              soldierLogs={soldierLogs}
+              units={units}
+              onUpdateAlert={handleUpdateAlert}
+              activeTab={activeTab as any}
+            />
+          )}
+        </>
+      )}
+
+      {/* Calculation Inspector Modal */}
       <ExplainabilityModal
         isOpen={isExplainabilityOpen}
         onClose={() => setIsExplainabilityOpen(false)}
@@ -525,6 +531,6 @@ export default function App() {
         onResetData={handleResetData}
         isResetting={isResetting}
       />
-    </div>
+    </AppShell>
   );
 }

@@ -38,6 +38,7 @@ interface DoctorDashboardProps {
       recommendedRestPeriod?: string;
     }
   ) => Promise<void>;
+  activeTab?: 'overview' | 'personnel-review' | 'high-risk' | 'interventions' | 'alerts';
 }
 
 export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
@@ -48,6 +49,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   soldierLogs,
   units,
   onUpdateAlert,
+  activeTab = 'overview',
 }) => {
   // Enhanced Filtering States (Requirement 7)
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'UNDER_OBSERVATION' | 'RESOLVED'>('ALL');
